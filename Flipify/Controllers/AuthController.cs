@@ -1,4 +1,5 @@
 ﻿using Flipify.DTOs;
+using Flipify.Helpers;
 using Flipify.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -30,38 +31,49 @@ public class AuthController : ControllerBase
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = Encoding.UTF8.GetBytes(_config["Jwt:Key"]);
 
-        var principal = tokenHandler.ValidateToken(token, new TokenValidationParameters
+        try
         {
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(key),
-            ValidateIssuer = false,
-            ValidateAudience = false,
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.Zero
-        }, out SecurityToken validatedToken);
+            var principal = tokenHandler.ValidateToken(token, new TokenValidationParameters
+            {
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(key),
+                ValidateIssuer = false,
+                ValidateAudience = false,
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.Zero
+            }, out SecurityToken validatedToken);
 
-        var emailClaim = principal.Claims.FirstOrDefault(c => c.Type == "Email");
-        if (emailClaim == null)
-            return BadRequest("Invalid token.");
+            var emailClaim = principal.Claims.FirstOrDefault(c => c.Type == "Email");
+            if (emailClaim == null)
+                return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid token.", 400));
 
-        var user = _context.Users.SingleOrDefault(u => u.Email == emailClaim.Value);
-        if (user == null)
-            return BadRequest("User not found.");
+            var user = _context.Users.SingleOrDefault(u => u.Email == emailClaim.Value);
+            if (user == null)
+                return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("User not found.", 400));
 
-        user.IsVerified = true;
-        _context.SaveChanges();
+            user.IsVerified = true;
+            _context.SaveChanges();
 
-        return Ok("Email verified successfully!");
+            return Ok(ApiResponseHelper.CreateSuccessResponse<string>("Email verified successfully."));
+        }
+        catch (SecurityTokenException)
+        {
+            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid token format.", 400));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, ApiResponseHelper.CreateErrorResponse<string>($"Internal server error: {ex.Message}", 500));
+        }
     }
 
     [HttpPost("register")]
     public IActionResult Register([FromBody] RegisterDto dto)
     {
         if (!ModelState.IsValid)
-            return BadRequest(ModelState);
+            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid request data.", 400));
 
         if (_context.Users.Any(u => u.Username == dto.Username))
-            return BadRequest("User already exists");
+            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("User already exists.", 400));
 
         var passwordHashSalt = HashPassword(dto.Password);
 
@@ -79,53 +91,50 @@ public class AuthController : ControllerBase
         _context.SaveChanges();
 
         var verificationToken = _jwtService.GenerateVerificationToken(user);
-
         _emailService.SendVerificationEmail(user, verificationToken);
 
-        return Ok("User created successfully. Please verify your email.");
+        return Ok(ApiResponseHelper.CreateSuccessResponse<string>("User created successfully. Please verify your email."));
     }
 
     [HttpPost("login")]
     public IActionResult Login([FromBody] LoginDto dto)
     {
         if (!ModelState.IsValid)
-            return BadRequest(ModelState);
+            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid request data.", 400));
 
         var user = _context.Users.SingleOrDefault(u => u.Username == dto.Username);
         if (user == null || !VerifyPassword(dto.Password, user.PasswordHash, user.PasswordSalt))
-            return Unauthorized("Invalid credentials");
+            return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid credentials.", 401));
 
         if (!user.IsVerified)
-            return Unauthorized("Please verify your email before logging in.");
+            return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Please verify your email before logging in.", 401));
 
         user.LastLoggedInDate = DateTime.UtcNow;
         _context.SaveChanges();
 
         var token = _jwtService.GenerateToken(user);
 
-        return Ok(new { token });
+        return Ok(ApiResponseHelper.CreateSuccessResponse(new { token }, "Login successful."));
     }
-
 
     [HttpDelete("delete")]
     [Authorize]
     public IActionResult DeleteUser([FromBody] DeleteUserDto dto)
     {
         if (!ModelState.IsValid)
-            return BadRequest(ModelState);
+            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid request data.", 400));
 
         var user = _context.Users.SingleOrDefault(u => u.Username == dto.Username && u.Email == dto.Email);
-
         if (user == null)
-            return BadRequest("User not found");
+            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("User not found.", 400));
 
         if (!VerifyPassword(dto.Password, user.PasswordHash, user.PasswordSalt))
-            return Unauthorized("Invalid credentials");
+            return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid credentials.", 401));
 
         _context.Users.Remove(user);
         _context.SaveChanges();
 
-        return Ok("User deleted successfully");
+        return Ok(ApiResponseHelper.CreateSuccessResponse<string>("User deleted successfully."));
     }
 
     private PasswordHashSalt HashPassword(string password)
@@ -152,7 +161,6 @@ public class AuthController : ControllerBase
         }
     }
 }
-
 public class PasswordHashSalt
 {
     public string Hash { get; set; }

@@ -1,4 +1,5 @@
 ﻿using Flipify.DTOs;
+using Flipify.Helpers;
 using Flipify.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -24,31 +25,25 @@ namespace Flipify.Controllers
         public IActionResult AddFlipcardSet([FromBody] CreateFlipcardSetDto dto)
         {
             if (!ModelState.IsValid)
-                return BadRequest(ModelState);
+                return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid request data.", 400));
 
-            string? username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
-            {
-                return Unauthorized("Invalid token: Username not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid token: Username not found.", 401));
 
-            User? user = _context.Users.FirstOrDefault(u => u.Username == username);
+            var user = _context.Users.FirstOrDefault(u => u.Username == username);
 
             if (user == null)
-            {
-                return Unauthorized("User not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("User not found.", 401));
 
-            FlipcardSet? existingSet = _context.FlipcardSets
+            var existingSet = _context.FlipcardSets
                 .FirstOrDefault(f => f.UserId == user.Id && f.Name == dto.Name);
 
             if (existingSet != null)
-            {
-                return BadRequest("A set with this name already exists for this user.");
-            }
+                return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("A set with this name already exists for this user.", 400));
 
-            FlipcardSet flipcardSet = new FlipcardSet
+            var flipcardSet = new FlipcardSet
             {
                 UserId = user.Id,
                 BaseLanguage = dto.BaseLanguage,
@@ -59,25 +54,21 @@ namespace Flipify.Controllers
             _context.FlipcardSets.Add(flipcardSet);
             _context.SaveChanges();
 
-            return Ok(new { message = "Flipcard set created successfully" });
+            return Ok(ApiResponseHelper.CreateSuccessResponse(flipcardSet, "Flipcard set created successfully."));
         }
 
         [HttpGet("my-sets")]
         public IActionResult GetMyFlipcardSets()
         {
-            string? username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
-            {
-                return Unauthorized("Invalid token: Username not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid token: Username not found.", 401));
 
-            User? user = _context.Users.SingleOrDefault(u => u.Username == username);
+            var user = _context.Users.SingleOrDefault(u => u.Username == username);
 
             if (user == null)
-            {
-                return Unauthorized("User not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("User not found.", 401));
 
             var flipcardSets = _context.FlipcardSets
                 .Where(fs => fs.UserId == user.Id)
@@ -92,9 +83,8 @@ namespace Flipify.Controllers
                 })
                 .ToList();
 
-            return Ok(flipcardSets);
+            return Ok(ApiResponseHelper.CreateSuccessResponse(flipcardSets, "Flipcard sets retrieved successfully."));
         }
-
 
         [HttpDelete("remove-set")]
         public IActionResult RemoveFlipcardSetWithFlipcards([FromBody] RemoveFlipcardSetDto dto)
@@ -102,24 +92,18 @@ namespace Flipify.Controllers
             var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
-            {
-                return Unauthorized("Invalid token: Username not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid token: Username not found.", 401));
 
             var user = _context.Users.FirstOrDefault(u => u.Username == username);
 
             if (user == null)
-            {
-                return Unauthorized("User not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("User not found.", 401));
 
             var flipcardSet = _context.FlipcardSets
                 .FirstOrDefault(fs => fs.Id == dto.SetId && fs.UserId == user.Id);
 
             if (flipcardSet == null)
-            {
-                return NotFound("Flipcard set not found or it doesn't belong to the user.");
-            }
+                return NotFound(ApiResponseHelper.CreateErrorResponse<string>("Flipcard set not found or it doesn't belong to the user.", 404));
 
             var flipcards = _context.Flipcards.Where(f => f.FlipcardSetId == dto.SetId).ToList();
 
@@ -127,9 +111,8 @@ namespace Flipify.Controllers
             _context.FlipcardSets.Remove(flipcardSet);
             _context.SaveChanges();
 
-            return Ok(new { message = "Flipcard set and its flipcards removed successfully." });
+            return Ok(ApiResponseHelper.CreateSuccessResponse<string>("Flipcard set and its flipcards removed successfully."));
         }
-
 
         #endregion
 
@@ -139,27 +122,21 @@ namespace Flipify.Controllers
         public IActionResult AddFlipcard([FromBody] CreateFlipcardDto dto)
         {
             if (!ModelState.IsValid)
-                return BadRequest(ModelState);
+                return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid request data.", 400));
 
             var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
-            {
-                return Unauthorized("Invalid token: Username not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid token: Username not found.", 401));
 
             var user = _context.Users.SingleOrDefault(u => u.Username == username);
 
             if (user == null)
-            {
-                return Unauthorized("User not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("User not found.", 401));
 
             var flipcardSet = _context.FlipcardSets.FirstOrDefault(f => f.Id == dto.FlipcardSetId && f.UserId == user.Id);
             if (flipcardSet == null)
-            {
-                return NotFound("Flipcard set not found or it doesn't belong to the user.");
-            }
+                return NotFound(ApiResponseHelper.CreateErrorResponse<string>("Flipcard set not found or it doesn't belong to the user.", 404));
 
             var flipcard = new Flipcard
             {
@@ -173,7 +150,7 @@ namespace Flipify.Controllers
             _context.Flipcards.Add(flipcard);
             _context.SaveChanges();
 
-            return Ok(new { message = "Flipcard created successfully", flipcard.Id });
+            return Ok(ApiResponseHelper.CreateSuccessResponse(flipcard, "Flipcard created successfully."));
         }
 
         [HttpDelete("remove-flipcard")]
@@ -182,39 +159,25 @@ namespace Flipify.Controllers
             var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
-            {
-                return Unauthorized("Invalid token: Username not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid token: Username not found.", 401));
 
             var user = _context.Users.FirstOrDefault(u => u.Username == username);
 
             if (user == null)
-            {
-                return Unauthorized("User not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("User not found.", 401));
 
             if (!Guid.TryParse(dto.FlipcardId, out Guid flipcardGuid))
-            {
-                return BadRequest("Invalid Flipcard ID format.");
-            }
+                return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid Flipcard ID format.", 400));
 
-            var test = _context.Flipcards;
-
-            var flipcard = _context.Flipcards
-                .Where(f => f.Id == flipcardGuid)
-                .FirstOrDefault();
-
+            var flipcard = _context.Flipcards.FirstOrDefault(f => f.Id == flipcardGuid && f.FlipcardSet.UserId == user.Id);
             if (flipcard == null)
-            {
-                return NotFound("Flipcard not found");
-            }
+                return NotFound(ApiResponseHelper.CreateErrorResponse<string>("Flipcard not found or it doesn't belong to the user.", 404));
 
             _context.Flipcards.Remove(flipcard);
             _context.SaveChanges();
 
-            return Ok(new { message = "Flipcard removed successfully" });
+            return Ok(ApiResponseHelper.CreateSuccessResponse<string>("Flipcard removed successfully."));
         }
-
 
         [HttpPut("edit-flipcard")]
         public IActionResult EditFlipcard([FromBody] UpdateFlipcardDto dto)
@@ -222,23 +185,16 @@ namespace Flipify.Controllers
             var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
-            {
-                return Unauthorized("Invalid token: Username not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid token: Username not found.", 401));
 
             var user = _context.Users.FirstOrDefault(u => u.Username == username);
 
             if (user == null)
-            {
-                return Unauthorized("User not found.");
-            }
+                return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("User not found.", 401));
 
             var flipcard = _context.Flipcards.FirstOrDefault(f => f.Id == dto.FlipcardId && f.FlipcardSet.UserId == user.Id);
-
             if (flipcard == null)
-            {
-                return NotFound("Flipcard not found or it doesn't belong to the user.");
-            }
+                return NotFound(ApiResponseHelper.CreateErrorResponse<string>("Flipcard not found or it doesn't belong to the user.", 404));
 
             if (flipcard.AttemptCount == 0)
             {
@@ -282,9 +238,8 @@ namespace Flipify.Controllers
 
             _context.SaveChanges();
 
-            return Ok(new { message = "Flipcard interval and review data updated successfully", flipcard });
+            return Ok(ApiResponseHelper.CreateSuccessResponse(flipcard, "Flipcard interval and review data updated successfully."));
         }
-
 
         #endregion
     }
