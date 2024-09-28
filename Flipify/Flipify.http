@@ -1,0 +1,6 @@
+@Flipify_HostAddress = http://localhost:5117
+
+GET {{Flipify_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
