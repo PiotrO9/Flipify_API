@@ -34,6 +34,18 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAllOrigins",
+        builder =>
+        {
+            builder.AllowAnyOrigin()
+                   .AllowAnyHeader()
+                   .AllowAnyMethod();
+        });
+});
+
+
 builder.Services.AddAuthorization();
 builder.Services.AddControllers().AddNewtonsoftJson();
 
@@ -51,5 +63,6 @@ app.UseAuthorization();
 app.MapGet("/", () => "App is working!");
 
 app.MapControllers();
+app.UseCors("AllowAllOrigins");
 
 app.Run();

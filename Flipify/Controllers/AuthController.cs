@@ -100,7 +100,7 @@ public class AuthController : ControllerBase
     public IActionResult Login([FromBody] LoginDto dto)
     {
         if (!ModelState.IsValid)
-            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid request data.", 400));
+            return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid request data.", 401));
 
         var user = _context.Users.SingleOrDefault(u => u.Username == dto.Username);
         if (user == null || !VerifyPassword(dto.Password, user.PasswordHash, user.PasswordSalt))
