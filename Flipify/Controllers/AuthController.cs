@@ -1,12 +1,13 @@
 ﻿using Flipify.DTOs;
-using Flipify.Helpers;
 using Flipify.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 
 [Route("api/[controller]")]
 [ApiController]
@@ -26,7 +27,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpGet("verify-email")]
-    public IActionResult VerifyEmail(string token)
+    public async Task<ActionResult<string>> VerifyEmail(string token)
     {
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = Encoding.UTF8.GetBytes(_config["Jwt:Key"]);
@@ -45,35 +46,35 @@ public class AuthController : ControllerBase
 
             var emailClaim = principal.Claims.FirstOrDefault(c => c.Type == "Email");
             if (emailClaim == null)
-                return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid token.", 400));
+                return BadRequest(new { error = "Invalid token." });
 
-            var user = _context.Users.SingleOrDefault(u => u.Email == emailClaim.Value);
+            var user = await _context.Users.SingleOrDefaultAsync(u => u.Email == emailClaim.Value);
             if (user == null)
-                return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("User not found.", 400));
+                return BadRequest(new { error = "User not found." });
 
             user.IsVerified = true;
-            _context.SaveChanges();
+            await _context.SaveChangesAsync();
 
-            return Ok(ApiResponseHelper.CreateSuccessResponse<string>("Email verified successfully."));
+            return Ok("Email verified successfully.");
         }
         catch (SecurityTokenException)
         {
-            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid token format.", 400));
+            return BadRequest(new { error = "Invalid token format." });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, ApiResponseHelper.CreateErrorResponse<string>($"Internal server error: {ex.Message}", 500));
+            return StatusCode(500, new { error = $"Internal server error: {ex.Message}" });
         }
     }
 
     [HttpPost("register")]
-    public IActionResult Register([FromBody] RegisterDto dto)
+    public async Task<ActionResult<string>> Register([FromBody] RegisterDto dto)
     {
         if (!ModelState.IsValid)
-            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid request data.", 400));
+            return BadRequest(ModelState);
 
-        if (_context.Users.Any(u => u.Username == dto.Username))
-            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("User already exists.", 400));
+        if (await _context.Users.AnyAsync(u => u.Username == dto.Username))
+            return BadRequest(new { error = "User already exists." });
 
         var passwordHashSalt = HashPassword(dto.Password);
 
@@ -88,53 +89,53 @@ public class AuthController : ControllerBase
         };
 
         _context.Users.Add(user);
-        _context.SaveChanges();
+        await _context.SaveChangesAsync();
 
         var verificationToken = _jwtService.GenerateVerificationToken(user);
         _emailService.SendVerificationEmail(user, verificationToken);
 
-        return Ok(ApiResponseHelper.CreateSuccessResponse<string>("User created successfully. Please verify your email."));
+        return Ok("User created successfully. Please verify your email.");
     }
 
     [HttpPost("login")]
-    public IActionResult Login([FromBody] LoginDto dto)
+    public async Task<ActionResult<object>> Login([FromBody] LoginDto dto)
     {
         if (!ModelState.IsValid)
-            return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid request data.", 401));
+            return BadRequest(ModelState);
 
-        var user = _context.Users.SingleOrDefault(u => u.Username == dto.Username);
+        var user = await _context.Users.SingleOrDefaultAsync(u => u.Username == dto.Username);
         if (user == null || !VerifyPassword(dto.Password, user.PasswordHash, user.PasswordSalt))
-            return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid credentials.", 401));
+            return Unauthorized(new { error = "Invalid credentials." });
 
         if (!user.IsVerified)
-            return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Please verify your email before logging in.", 401));
+            return Unauthorized(new { error = "Please verify your email before logging in." });
 
         user.LastLoggedInDate = DateTime.UtcNow;
-        _context.SaveChanges();
+        await _context.SaveChangesAsync();
 
         var token = _jwtService.GenerateToken(user);
 
-        return Ok(ApiResponseHelper.CreateSuccessResponse(new { token }, "Login successful."));
+        return Ok(new { token });
     }
 
     [HttpDelete("delete")]
     [Authorize]
-    public IActionResult DeleteUser([FromBody] DeleteUserDto dto)
+    public async Task<ActionResult<string>> DeleteUser([FromBody] DeleteUserDto dto)
     {
         if (!ModelState.IsValid)
-            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("Invalid request data.", 400));
+            return BadRequest(ModelState);
 
-        var user = _context.Users.SingleOrDefault(u => u.Username == dto.Username && u.Email == dto.Email);
+        var user = await _context.Users.SingleOrDefaultAsync(u => u.Username == dto.Username && u.Email == dto.Email);
         if (user == null)
-            return BadRequest(ApiResponseHelper.CreateErrorResponse<string>("User not found.", 400));
+            return BadRequest(new { error = "User not found." });
 
         if (!VerifyPassword(dto.Password, user.PasswordHash, user.PasswordSalt))
-            return Unauthorized(ApiResponseHelper.CreateErrorResponse<string>("Invalid credentials.", 401));
+            return Unauthorized(new { error = "Invalid credentials." });
 
         _context.Users.Remove(user);
-        _context.SaveChanges();
+        await _context.SaveChangesAsync();
 
-        return Ok(ApiResponseHelper.CreateSuccessResponse<string>("User deleted successfully."));
+        return Ok("User deleted successfully.");
     }
 
     private PasswordHashSalt HashPassword(string password)
@@ -161,6 +162,7 @@ public class AuthController : ControllerBase
         }
     }
 }
+
 public class PasswordHashSalt
 {
     public string Hash { get; set; }
