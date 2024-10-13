@@ -22,14 +22,15 @@ public class JwtService
         {
             new Claim(JwtRegisteredClaimNames.Sub, user.Username),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new Claim(ClaimTypes.Name, user.Username)
+            new Claim(ClaimTypes.Name, user.Username),
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())
         };
 
         var token = new JwtSecurityToken(
             issuer: _config["Jwt:Issuer"],
             audience: _config["Jwt:Audience"],
             claims: claims,
-            expires: DateTime.Now.AddMinutes(15), // Access token expires in 15 minutes
+            expires: DateTime.Now.AddMinutes(15),
             signingCredentials: creds);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
@@ -44,7 +45,6 @@ public class JwtService
             return Convert.ToBase64String(randomNumber);
         }
     }
-
     public string GenerateVerificationToken(User user)
     {
         var tokenHandler = new JwtSecurityTokenHandler();
@@ -62,5 +62,34 @@ public class JwtService
 
         var token = tokenHandler.CreateToken(tokenDescriptor);
         return tokenHandler.WriteToken(token);
+    }
+
+    public ClaimsPrincipal? ValidateToken(string token)
+    {
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var key = Encoding.UTF8.GetBytes(_config["Jwt:Key"]);
+        try
+        {
+            var claims = tokenHandler.ValidateToken(token, new TokenValidationParameters
+            {
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(key),
+                ValidateIssuer = false,
+                ValidateAudience = false,
+                ClockSkew = TimeSpan.Zero
+            }, out SecurityToken validatedToken);
+
+            return claims;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public string? GetUserIdFromToken(string token)
+    {
+        var claims = ValidateToken(token);
+        return claims?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
     }
 }

@@ -60,7 +60,7 @@ app.UseMiddleware<ExceptionMiddleware>();
 app.UseHttpsRedirection();
 
 app.UseCors("AllowAll");
-
+app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 

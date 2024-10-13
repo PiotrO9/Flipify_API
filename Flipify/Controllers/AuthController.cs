@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using System.Data.Entity;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Cryptography;
 using System.Text;
@@ -99,12 +100,12 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("login")]
-    public async Task<ActionResult<object>> Login([FromBody] LoginDto dto)
+    public async Task<ActionResult> Login([FromBody] LoginDto dto)
     {
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
-        var user = await _context.Users.SingleOrDefaultAsync(u => u.Username == dto.Username);
+        var user = _context.Users.Where(u => u.Username == dto.Username).FirstOrDefault();
         if (user == null || !VerifyPassword(dto.Password, user.PasswordHash, user.PasswordSalt))
             return Unauthorized(new { error = "Invalid credentials." });
 
@@ -114,156 +115,88 @@ public class AuthController : ControllerBase
         user.LastLoggedInDate = DateTime.UtcNow;
         await _context.SaveChangesAsync();
 
-        // Generate JWT token
         var accessToken = _jwtService.GenerateToken(user);
         var refreshToken = _jwtService.GenerateRefreshToken();
 
-        // Save the refresh token to the database
         SaveRefreshTokenToDatabase(user.Id, refreshToken);
 
-        // Set the access token in an HTTP-only cookie
         var accessCookieOptions = new CookieOptions
         {
             HttpOnly = true,
-            Secure = true,  // Set to true in production
-            Expires = DateTime.Now.AddMinutes(15), // Set access token expiration
-            SameSite = SameSiteMode.Lax
+            Secure = false,
+            SameSite = SameSiteMode.None,
+            Expires = DateTime.UtcNow.AddMinutes(15),
         };
         Response.Cookies.Append("accessToken", accessToken, accessCookieOptions);
 
-        // Set the refresh token in an HTTP-only cookie
-        var refreshCookieOptions = new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,  // Set to true in production
-            Expires = DateTime.Now.AddDays(30),
-            SameSite = SameSiteMode.Lax
-        };
-        Response.Cookies.Append("refreshToken", refreshToken, refreshCookieOptions);
+        return Ok(new { message = "Login successful" });
+    }
 
-        return Ok(new { accessToken });
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout()
+    {
+        var accessToken = Request.Cookies["accessToken"];
+
+        if (string.IsNullOrEmpty(accessToken))
+            return Unauthorized(new { error = "No access token provided." });
+
+        var claimsPrincipal = _jwtService.ValidateToken(accessToken);
+        if (claimsPrincipal == null)
+            return Unauthorized(new { error = "Invalid access token." });
+
+        var userName = _jwtService.GetUserIdFromToken(accessToken);
+        if (userName == null)
+            return Unauthorized(new { error = "Invalid access token." });
+
+        User? foundUser = _context.Users.Where(u => u.Username == userName).FirstOrDefault();
+        if (foundUser == null)
+            return Unauthorized(new { error = "Invalid access token." });
+
+        var storedRefreshToken = _context.RefreshTokens
+            .Where(rt => rt.UserId == Guid.Parse(foundUser.Id.ToString()) && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow)
+            .FirstOrDefault();
+
+        if (storedRefreshToken != null)
+        {
+            storedRefreshToken.IsRevoked = true;
+            await _context.SaveChangesAsync();
+        }
+
+        var cookieOptions = new CookieOptions
+        {
+            Expires = DateTime.UtcNow.AddDays(-1),
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.Strict
+        };
+        Response.Cookies.Delete("accessToken");
+
+        return Ok(new { message = "Logged out successfully" });
     }
 
 
     [HttpPost("refresh")]
     public async Task<ActionResult<object>> Refresh()
     {
-        var refreshToken = Request.Cookies["refreshToken"];
-        if (string.IsNullOrEmpty(refreshToken))
-        {
-            return Unauthorized("No refresh token provided.");
-        }
-
-        var storedToken = await _context.RefreshTokens
-            .SingleOrDefaultAsync(t => t.Token == refreshToken && !t.IsRevoked);
-
-        if (storedToken == null || storedToken.ExpiresAt < DateTime.UtcNow)
-        {
-            return Unauthorized("Invalid or expired refresh token.");
-        }
-
-        var user = await _context.Users.FindAsync(storedToken.UserId);
-        var accessToken = _jwtService.GenerateToken(user);
-
-        return Ok(new { accessToken });
-    }
-
-    [HttpPost("logout")]
-    [Authorize]
-    public async Task<IActionResult> Logout()
-    {
-        var refreshToken = Request.Cookies["refreshToken"];
-        if (!string.IsNullOrEmpty(refreshToken))
-        {
-            var storedToken = await _context.RefreshTokens.SingleOrDefaultAsync(t => t.Token == refreshToken);
-            if (storedToken != null)
-            {
-                storedToken.IsRevoked = true;
-                await _context.SaveChangesAsync();
-            }
-
-            Response.Cookies.Delete("refreshToken");
-        }
-
         return Ok();
     }
 
     [HttpGet("validate-token")]
-    [Authorize]
-    public async Task<IActionResult> ValidateToken()
+    public IActionResult ValidateToken()
     {
-        // Retrieve the access token from the HTTP-only cookie
         var accessToken = Request.Cookies["accessToken"];
+
         if (string.IsNullOrEmpty(accessToken))
-        {
             return Unauthorized(new { error = "No access token provided." });
-        }
 
-        var tokenHandler = new JwtSecurityTokenHandler();
-        var key = Encoding.UTF8.GetBytes(_config["Jwt:Key"]);
+        var claimsPrincipal = _jwtService.ValidateToken(accessToken);
+        if (claimsPrincipal == null)
+            return Unauthorized(new { error = "Invalid or expired access token." });
 
-        try
-        {
-            // Validate the access token
-            var principal = tokenHandler.ValidateToken(accessToken, new TokenValidationParameters
-            {
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(key),
-                ValidateIssuer = false,
-                ValidateAudience = false,
-                ValidateLifetime = true, // Ensures the token has not expired
-                ClockSkew = TimeSpan.Zero
-            }, out SecurityToken validatedToken);
+        var userId = _jwtService.GetUserIdFromToken(accessToken);
 
-            // If access token is valid, return 200 OK
-            return Ok(new { message = "Access token is valid." });
-        }
-        catch (SecurityTokenExpiredException)
-        {
-            // If access token is expired, attempt to refresh it using the refresh token
-
-            // Retrieve the refresh token from the HTTP-only cookie
-            var refreshToken = Request.Cookies["refreshToken"];
-            if (string.IsNullOrEmpty(refreshToken))
-            {
-                return Unauthorized(new { error = "Refresh token not provided or expired." });
-            }
-
-            // Validate the refresh token
-            var storedRefreshToken = await _context.RefreshTokens
-                .SingleOrDefaultAsync(t => t.Token == refreshToken && !t.IsRevoked);
-
-            if (storedRefreshToken == null || storedRefreshToken.ExpiresAt < DateTime.UtcNow)
-            {
-                return Unauthorized(new { error = "Invalid or expired refresh token." });
-            }
-
-            // If refresh token is valid, generate a new access token
-            var user = await _context.Users.FindAsync(storedRefreshToken.UserId);
-            var newAccessToken = _jwtService.GenerateToken(user);
-
-            // Optionally: set the new access token in the cookie (you can also return it in the response body)
-            var cookieOptions = new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = true, // Set to true in production
-                Expires = DateTime.Now.AddMinutes(30) // Set access token expiration
-            };
-            Response.Cookies.Append("accessToken", newAccessToken, cookieOptions);
-
-            // Return a new access token to the client
-            return Ok(new { accessToken = newAccessToken });
-        }
-        catch (SecurityTokenException)
-        {
-            return Unauthorized(new { error = "Invalid access token." });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { error = $"Internal server error: {ex.Message}" });
-        }
+        return Ok(new { message = "Token is valid" });
     }
-
 
     private void SaveRefreshTokenToDatabase(Guid userId, string refreshToken)
     {
