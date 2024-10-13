@@ -36,12 +36,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAllOrigins",
+    options.AddPolicy("AllowAll",
         builder =>
         {
-            builder.AllowAnyOrigin()
-                   .AllowAnyHeader()
-                   .AllowAnyMethod();
+            builder
+                 .WithOrigins("http://localhost:3000")
+                 .AllowAnyMethod()
+                 .AllowAnyHeader()
+                 .AllowCredentials();
         });
 });
 
@@ -57,12 +59,12 @@ app.UseMiddleware<ExceptionMiddleware>();
 
 app.UseHttpsRedirection();
 
+app.UseCors("AllowAll");
+
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/", () => "App is working!");
-
 app.MapControllers();
-app.UseCors("AllowAllOrigins");
 
 app.Run();

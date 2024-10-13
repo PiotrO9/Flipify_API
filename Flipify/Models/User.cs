@@ -1,4 +1,6 @@
-﻿public class User
+﻿using Flipify.Models;
+
+public class User
 {
     public Guid Id { get; set; }
 
@@ -15,4 +17,5 @@
     public DateTime? LastLoggedInDate { get; set; }
 
     public bool IsVerified { get; set; } = false;
+    public List<RefreshToken>? RefreshTokens { get; set; }
 }
