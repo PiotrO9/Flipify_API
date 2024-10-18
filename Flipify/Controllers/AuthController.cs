@@ -7,9 +7,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Data.Entity;
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
 
 [Route("api/[controller]")]
 [ApiController]
@@ -31,12 +31,12 @@ public class AuthController : ControllerBase
     [HttpGet("verify-email")]
     public async Task<ActionResult<string>> VerifyEmail(string token)
     {
-        var tokenHandler = new JwtSecurityTokenHandler();
-        var key = Encoding.UTF8.GetBytes(_config["Jwt:Key"]);
+        JwtSecurityTokenHandler tokenHandler = new();
+        byte[]? key = Encoding.UTF8.GetBytes(_config["Jwt:Key"]);
 
         try
         {
-            var principal = tokenHandler.ValidateToken(token, new TokenValidationParameters
+            ClaimsPrincipal? principal = tokenHandler.ValidateToken(token, new TokenValidationParameters
             {
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = new SymmetricSecurityKey(key),
@@ -46,11 +46,11 @@ public class AuthController : ControllerBase
                 ClockSkew = TimeSpan.Zero
             }, out SecurityToken validatedToken);
 
-            var emailClaim = principal.Claims.FirstOrDefault(c => c.Type == "Email");
+            Claim? emailClaim = principal.Claims.FirstOrDefault(c => c.Type == "Email");
             if (emailClaim == null)
                 return BadRequest(new { error = "Invalid token." });
 
-            var user = await _context.Users.SingleOrDefaultAsync(u => u.Email == emailClaim.Value);
+            User? user = await _context.Users.SingleOrDefaultAsync(u => u.Email == emailClaim.Value);
             if (user == null)
                 return BadRequest(new { error = "User not found." });
 
@@ -78,9 +78,9 @@ public class AuthController : ControllerBase
         if (await _context.Users.AnyAsync(u => u.Username == dto.Username))
             return BadRequest(new { error = "User already exists." });
 
-        var passwordHashSalt = HashPassword(dto.Password);
+        PasswordHashSalt? passwordHashSalt = HashPassword(dto.Password);
 
-        var user = new User
+        User user = new()
         {
             Id = Guid.NewGuid(),
             Username = dto.Username,
@@ -93,7 +93,7 @@ public class AuthController : ControllerBase
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
 
-        var verificationToken = _jwtService.GenerateVerificationToken(user);
+        string? verificationToken = _jwtService.GenerateVerificationToken(user);
         _emailService.SendVerificationEmail(user, verificationToken);
 
         return Ok("User created successfully. Please verify your email.");
@@ -105,7 +105,7 @@ public class AuthController : ControllerBase
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
-        var user = _context.Users.Where(u => u.Username == dto.Username).FirstOrDefault();
+        User? user = _context.Users.Where(u => u.Username == dto.Username).FirstOrDefault();
         if (user == null || !VerifyPassword(dto.Password, user.PasswordHash, user.PasswordSalt))
             return Unauthorized(new { error = "Invalid credentials." });
 
@@ -115,12 +115,12 @@ public class AuthController : ControllerBase
         user.LastLoggedInDate = DateTime.UtcNow;
         await _context.SaveChangesAsync();
 
-        var accessToken = _jwtService.GenerateToken(user);
-        var refreshToken = _jwtService.GenerateRefreshToken();
+        string? accessToken = _jwtService.GenerateToken(user);
+        string? refreshToken = _jwtService.GenerateRefreshToken();
 
         SaveRefreshTokenToDatabase(user.Id, refreshToken);
 
-        var accessCookieOptions = new CookieOptions
+        CookieOptions accessCookieOptions = new()
         {
             HttpOnly = true,
             Secure = false,
@@ -135,26 +135,16 @@ public class AuthController : ControllerBase
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
-        var accessToken = Request.Cookies["accessToken"];
+        string? accessToken = Request.Cookies["accessToken"];
 
-        if (string.IsNullOrEmpty(accessToken))
-            return Unauthorized(new { error = "No access token provided." });
+        (bool isValid, string? errorMessage, User? foundUser) = await ValidateAccessTokenAsync(accessToken);
 
-        var claimsPrincipal = _jwtService.ValidateToken(accessToken);
-        if (claimsPrincipal == null)
-            return Unauthorized(new { error = "Invalid access token." });
+        if (!isValid)
+            return Unauthorized(new { error = errorMessage });
 
-        var userName = _jwtService.GetUserIdFromToken(accessToken);
-        if (userName == null)
-            return Unauthorized(new { error = "Invalid access token." });
-
-        User? foundUser = _context.Users.Where(u => u.Username == userName).FirstOrDefault();
-        if (foundUser == null)
-            return Unauthorized(new { error = "Invalid access token." });
-
-        var storedRefreshToken = _context.RefreshTokens
+        RefreshToken storedRefreshToken = await _context.RefreshTokens
             .Where(rt => rt.UserId == Guid.Parse(foundUser.Id.ToString()) && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow)
-            .FirstOrDefault();
+            .FirstOrDefaultAsync();
 
         if (storedRefreshToken != null)
         {
@@ -162,18 +152,17 @@ public class AuthController : ControllerBase
             await _context.SaveChangesAsync();
         }
 
-        var cookieOptions = new CookieOptions
+        CookieOptions cookieOptions = new()
         {
             Expires = DateTime.UtcNow.AddDays(-1),
             HttpOnly = true,
             Secure = true,
             SameSite = SameSiteMode.Strict
         };
-        Response.Cookies.Delete("accessToken");
+        Response.Cookies.Delete("accessToken", cookieOptions);
 
         return Ok(new { message = "Logged out successfully" });
     }
-
 
     [HttpPost("refresh")]
     public async Task<ActionResult<object>> Refresh()
@@ -184,23 +173,23 @@ public class AuthController : ControllerBase
     [HttpGet("validate-token")]
     public IActionResult ValidateToken()
     {
-        var accessToken = Request.Cookies["accessToken"];
+        string? accessToken = Request.Cookies["accessToken"];
 
         if (string.IsNullOrEmpty(accessToken))
             return Unauthorized(new { error = "No access token provided." });
 
-        var claimsPrincipal = _jwtService.ValidateToken(accessToken);
+        ClaimsPrincipal? claimsPrincipal = _jwtService.ValidateToken(accessToken);
         if (claimsPrincipal == null)
             return Unauthorized(new { error = "Invalid or expired access token." });
 
-        var userId = _jwtService.GetUserIdFromToken(accessToken);
+        string? userId = _jwtService.GetUserIdFromToken(accessToken);
 
         return Ok(new { message = "Token is valid" });
     }
 
     private void SaveRefreshTokenToDatabase(Guid userId, string refreshToken)
     {
-        var expiryDate = DateTime.UtcNow.AddDays(30);
+        DateTime expiryDate = DateTime.UtcNow.AddDays(30);
         var userToken = new RefreshToken
         {
             UserId = userId,
@@ -231,13 +220,31 @@ public class AuthController : ControllerBase
 
         return Ok("User deleted successfully.");
     }
+    private async Task<(bool IsValid, string? ErrorMessage, User? User)> ValidateAccessTokenAsync(string? accessToken)
+    {
+        if (string.IsNullOrEmpty(accessToken))
+            return (false, "No access token provided.", null);
 
+        var claimsPrincipal = _jwtService.ValidateToken(accessToken);
+        if (claimsPrincipal == null)
+            return (false, "Invalid access token.", null);
+
+        var userName = _jwtService.GetUserIdFromToken(accessToken);
+        if (userName == null)
+            return (false, "Invalid access token.", null);
+
+        User? foundUser = await _context.Users.Where(u => u.Username == userName).FirstOrDefaultAsync();
+        if (foundUser == null)
+            return (false, "Invalid access token.", null);
+
+        return (true, null, foundUser);
+    }
     private PasswordHashSalt HashPassword(string password)
     {
-        using (var hmac = new HMACSHA512())
+        using (HMACSHA512 hmac = new())
         {
-            var salt = hmac.Key;
-            var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(password));
+            byte[]? salt = hmac.Key;
+            byte[]? hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(password));
 
             return new PasswordHashSalt
             {
@@ -249,9 +256,9 @@ public class AuthController : ControllerBase
 
     private bool VerifyPassword(string password, string storedHash, string storedSalt)
     {
-        using (var hmac = new HMACSHA512(Convert.FromBase64String(storedSalt)))
+        using (HMACSHA512 hmac = new(Convert.FromBase64String(storedSalt)))
         {
-            var computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(password));
+            byte[]? computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(password));
             return Convert.ToBase64String(computedHash) == storedHash;
         }
     }

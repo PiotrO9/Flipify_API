@@ -26,23 +26,23 @@ namespace Flipify.Controllers
             if (!ModelState.IsValid)
                 return BadRequest("Invalid request data.");
 
-            var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            string? username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
                 return Unauthorized("Invalid token: Username not found.");
 
-            var user = _context.Users.FirstOrDefault(u => u.Username == username);
+            User? user = _context.Users.FirstOrDefault(u => u.Username == username);
 
             if (user == null)
                 return Unauthorized("User not found.");
 
-            var existingSet = _context.FlipcardSets
+            FlipcardSet? existingSet = _context.FlipcardSets
                 .FirstOrDefault(f => f.UserId == user.Id && f.Name == dto.Name);
 
             if (existingSet != null)
                 return BadRequest("A set with this name already exists for this user.");
 
-            var flipcardSet = new FlipcardSet
+            FlipcardSet flipcardSet = new()
             {
                 UserId = user.Id,
                 BaseLanguage = dto.BaseLanguage,
@@ -59,12 +59,12 @@ namespace Flipify.Controllers
         [HttpGet("my-sets")]
         public IActionResult GetMyFlipcardSets()
         {
-            var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            string? username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
                 return Unauthorized("Invalid token: Username not found.");
 
-            var user = _context.Users.SingleOrDefault(u => u.Username == username);
+            User? user = _context.Users.SingleOrDefault(u => u.Username == username);
 
             if (user == null)
                 return Unauthorized("User not found.");
@@ -88,23 +88,23 @@ namespace Flipify.Controllers
         [HttpDelete("remove-set")]
         public IActionResult RemoveFlipcardSetWithFlipcards([FromBody] RemoveFlipcardSetDto dto)
         {
-            var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            string? username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
                 return Unauthorized("Invalid token: Username not found.");
 
-            var user = _context.Users.FirstOrDefault(u => u.Username == username);
+            User? user = _context.Users.FirstOrDefault(u => u.Username == username);
 
             if (user == null)
                 return Unauthorized("User not found.");
 
-            var flipcardSet = _context.FlipcardSets
+            FlipcardSet? flipcardSet = _context.FlipcardSets
                 .FirstOrDefault(fs => fs.Id == dto.SetId && fs.UserId == user.Id);
 
             if (flipcardSet == null)
                 return NotFound("Flipcard set not found or it doesn't belong to the user.");
 
-            var flipcards = _context.Flipcards.Where(f => f.FlipcardSetId == dto.SetId).ToList();
+            List<Flipcard> flipcards = _context.Flipcards.Where(f => f.FlipcardSetId == dto.SetId).ToList();
 
             _context.Flipcards.RemoveRange(flipcards);
             _context.FlipcardSets.Remove(flipcardSet);
@@ -123,21 +123,21 @@ namespace Flipify.Controllers
             if (!ModelState.IsValid)
                 return BadRequest("Invalid request data.");
 
-            var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            string? username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
                 return Unauthorized("Invalid token: Username not found.");
 
-            var user = _context.Users.SingleOrDefault(u => u.Username == username);
+            User? user = _context.Users.SingleOrDefault(u => u.Username == username);
 
             if (user == null)
                 return Unauthorized("User not found.");
 
-            var flipcardSet = _context.FlipcardSets.FirstOrDefault(f => f.Id == dto.FlipcardSetId && f.UserId == user.Id);
+            FlipcardSet? flipcardSet = _context.FlipcardSets.FirstOrDefault(f => f.Id == dto.FlipcardSetId && f.UserId == user.Id);
             if (flipcardSet == null)
                 return NotFound("Flipcard set not found or it doesn't belong to the user.");
 
-            var flipcard = new Flipcard
+            Flipcard flipcard = new()
             {
                 FlipcardSetId = flipcardSet.Id,
                 NativeWord = dto.NativeWord,
@@ -155,12 +155,12 @@ namespace Flipify.Controllers
         [HttpDelete("remove-flipcard")]
         public IActionResult RemoveFlipcard([FromBody] RemoveFlipcardDto dto)
         {
-            var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            string? username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
                 return Unauthorized("Invalid token: Username not found.");
 
-            var user = _context.Users.FirstOrDefault(u => u.Username == username);
+            User? user = _context.Users.FirstOrDefault(u => u.Username == username);
 
             if (user == null)
                 return Unauthorized("User not found.");
@@ -168,7 +168,7 @@ namespace Flipify.Controllers
             if (!Guid.TryParse(dto.FlipcardId, out Guid flipcardGuid))
                 return BadRequest("Invalid Flipcard ID format.");
 
-            var flipcard = _context.Flipcards.FirstOrDefault(f => f.Id == flipcardGuid && f.FlipcardSet.UserId == user.Id);
+            Flipcard? flipcard = _context.Flipcards.FirstOrDefault(f => f.Id == flipcardGuid && f.FlipcardSet.UserId == user.Id);
             if (flipcard == null)
                 return NotFound("Flipcard not found or it doesn't belong to the user.");
 
@@ -181,17 +181,17 @@ namespace Flipify.Controllers
         [HttpPut("edit-flipcard")]
         public IActionResult EditFlipcard([FromBody] UpdateFlipcardDto dto)
         {
-            var username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            string? username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
 
             if (username == null)
                 return Unauthorized("Invalid token: Username not found.");
 
-            var user = _context.Users.FirstOrDefault(u => u.Username == username);
+            User? user = _context.Users.FirstOrDefault(u => u.Username == username);
 
             if (user == null)
                 return Unauthorized("User not found.");
 
-            var flipcard = _context.Flipcards.FirstOrDefault(f => f.Id == dto.FlipcardId && f.FlipcardSet.UserId == user.Id);
+            Flipcard? flipcard = _context.Flipcards.FirstOrDefault(f => f.Id == dto.FlipcardId && f.FlipcardSet.UserId == user.Id);
             if (flipcard == null)
                 return NotFound("Flipcard not found or it doesn't belong to the user.");
 
