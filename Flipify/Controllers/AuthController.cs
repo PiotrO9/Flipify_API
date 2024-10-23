@@ -18,13 +18,15 @@ public class AuthController : ControllerBase
     private readonly AppDbContext _context;
     private readonly JwtService _jwtService;
     private readonly EmailService _emailService;
+    private readonly TokenValidationService _tokenValidationService;
     private readonly IConfiguration _config;
 
-    public AuthController(AppDbContext context, JwtService jwtService, EmailService emailService, IConfiguration config)
+    public AuthController(AppDbContext context, JwtService jwtService, EmailService emailService, TokenValidationService tokenValidationService, IConfiguration config)
     {
         _context = context;
         _jwtService = jwtService;
         _emailService = emailService;
+        _tokenValidationService = tokenValidationService;
         _config = config;
     }
 
@@ -137,14 +139,14 @@ public class AuthController : ControllerBase
     {
         string? accessToken = Request.Cookies["accessToken"];
 
-        (bool isValid, string? errorMessage, User? foundUser) = await ValidateAccessTokenAsync(accessToken);
+        (bool isValid, string? errorMessage, User? foundUser) = await _tokenValidationService.ValidateAccessTokenAsync(accessToken);
 
         if (!isValid)
             return Unauthorized(new { error = errorMessage });
 
-        RefreshToken storedRefreshToken = await _context.RefreshTokens
+        RefreshToken? storedRefreshToken = _context.RefreshTokens
             .Where(rt => rt.UserId == Guid.Parse(foundUser.Id.ToString()) && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow)
-            .FirstOrDefaultAsync();
+            .FirstOrDefault();
 
         if (storedRefreshToken != null)
         {
@@ -219,25 +221,6 @@ public class AuthController : ControllerBase
         await _context.SaveChangesAsync();
 
         return Ok("User deleted successfully.");
-    }
-    private async Task<(bool IsValid, string? ErrorMessage, User? User)> ValidateAccessTokenAsync(string? accessToken)
-    {
-        if (string.IsNullOrEmpty(accessToken))
-            return (false, "No access token provided.", null);
-
-        var claimsPrincipal = _jwtService.ValidateToken(accessToken);
-        if (claimsPrincipal == null)
-            return (false, "Invalid access token.", null);
-
-        var userName = _jwtService.GetUserIdFromToken(accessToken);
-        if (userName == null)
-            return (false, "Invalid access token.", null);
-
-        User? foundUser = await _context.Users.Where(u => u.Username == userName).FirstOrDefaultAsync();
-        if (foundUser == null)
-            return (false, "Invalid access token.", null);
-
-        return (true, null, foundUser);
     }
     private PasswordHashSalt HashPassword(string password)
     {

@@ -12,10 +12,14 @@ namespace Flipify.Controllers
     public class FlipcardsController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly JwtService _jwtService;
+        private readonly TokenValidationService _tokenValidationService;
 
-        public FlipcardsController(AppDbContext context)
+        public FlipcardsController(AppDbContext context, JwtService jwtService, TokenValidationService tokenValidationService)
         {
             _context = context;
+            _jwtService = jwtService;
+            _tokenValidationService = tokenValidationService;
         }
 
         #region Set endpoints
@@ -57,20 +61,17 @@ namespace Flipify.Controllers
         }
 
         [HttpGet("my-sets")]
-        public IActionResult GetMyFlipcardSets()
+        public async  Task<IActionResult> GetMyFlipcardSets()
         {
-            string? username = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            string? accessToken = Request.Cookies["accessToken"];
 
-            if (username == null)
-                return Unauthorized("Invalid token: Username not found.");
+            (bool isValid, string? errorMessage, User? foundUser) = await _tokenValidationService.ValidateAccessTokenAsync(accessToken);
 
-            User? user = _context.Users.SingleOrDefault(u => u.Username == username);
-
-            if (user == null)
-                return Unauthorized("User not found.");
+            if (!isValid)
+                return Unauthorized(new { error = errorMessage });
 
             var flipcardSets = _context.FlipcardSets
-                .Where(fs => fs.UserId == user.Id)
+                .Where(fs => fs.UserId == Guid.Parse(foundUser.Id.ToString()))
                 .Select(fs => new
                 {
                     fs.Id,

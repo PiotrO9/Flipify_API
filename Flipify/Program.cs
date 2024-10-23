@@ -17,6 +17,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<EmailService>();
+builder.Services.AddScoped<TokenValidationService>();
 builder.Services.AddSingleton<IConfiguration>(builder.Configuration);
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
