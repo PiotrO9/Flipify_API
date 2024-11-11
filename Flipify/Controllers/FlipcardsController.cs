@@ -87,39 +87,6 @@ namespace Flipify.Controllers
             return Ok(flipcardSets);
         }
 
-        [HttpPost("get-flipcards-from-set")]
-        public async Task<IActionResult> GetFlipcardsFromSet([FromBody] GetFlipcardsFromSetDto dto)
-        {
-            string? accessToken = Request.Cookies["accessToken"];
-
-            (bool isValid, string? errorMessage, User? foundUser) = await _tokenValidationService.ValidateAccessTokenAsync(accessToken);
-
-            if (!isValid)
-                return Unauthorized(new { error = errorMessage });
-
-            FlipcardSet? flipcardSet = _context.FlipcardSets
-                .FirstOrDefault(fs => fs.Id == dto.setId && fs.UserId == foundUser.Id);
-
-            if (flipcardSet == null)
-                return NotFound("Flipcard set not found or it doesn't belong to the user.");
-
-            var flipcardsData = _context.Flipcards.Select(f => new
-            {
-                f.Id,
-                f.NativeWord,
-                f.ForeignWord,
-                f.NativeWordExample,
-                f.ForeignWordExample,
-                f.LastReviewDate,
-                f.NextReviewDate,
-                f.IntervalDays,
-                f.Ef,
-                f.AttemptCount
-            }).ToList();
-
-            return Ok(flipcardsData);
-        }
-
         [HttpDelete("remove-set")]
         public IActionResult RemoveFlipcardSetWithFlipcards([FromBody] RemoveFlipcardSetDto dto)
         {
@@ -185,6 +152,39 @@ namespace Flipify.Controllers
             _context.SaveChanges();
 
             return Ok(flipcard);
+        }
+
+        [HttpPost("get-flipcards-from-set")]
+        public async Task<IActionResult> GetFlipcardsFromSet([FromBody] GetFlipcardsFromSetDto dto)
+        {
+            string? accessToken = Request.Cookies["accessToken"];
+
+            (bool isValid, string? errorMessage, User? foundUser) = await _tokenValidationService.ValidateAccessTokenAsync(accessToken);
+
+            if (!isValid)
+                return Unauthorized(new { error = errorMessage });
+
+            FlipcardSet? flipcardSet = _context.FlipcardSets
+                .FirstOrDefault(fs => fs.Id == dto.setId && fs.UserId == foundUser.Id);
+
+            if (flipcardSet == null)
+                return NotFound("Flipcard set not found or it doesn't belong to the user.");
+
+            var flipcardsData = _context.Flipcards.Select(f => new
+            {
+                f.Id,
+                f.NativeWord,
+                f.ForeignWord,
+                f.NativeWordExample,
+                f.ForeignWordExample,
+                f.LastReviewDate,
+                f.NextReviewDate,
+                f.IntervalDays,
+                f.Ef,
+                f.AttemptCount
+            }).ToList();
+
+            return Ok(flipcardsData);
         }
 
         [HttpDelete("remove-flipcard")]
